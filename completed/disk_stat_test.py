@@ -1,0 +1,71 @@
+#Simple script to gather some data about a disk to verify it's seen by the OS
+#and is properly represented.  Defaults to sda if not passed a disk at run time
+
+from pathlib import Path
+import argparse
+import subprocess
+import time
+
+parser = argparse.ArgumentParser(prog="disk_stat_test")
+parser.add_argument("-d", "--disk")
+args = parser.parse_args()
+if args.disk:
+    DISK = args.disk
+else:
+    DISK="sda"
+
+status = 0
+
+def check_return_code(code, msg, items=[]):
+    global status
+    if code != 0:
+        print(f"ERROR: retval {code} : {msg}")
+        if status == 0:
+            status = code
+
+        for item in items:
+            print("output: ", item)
+
+nvdimm="pmem"
+if nvdimm in DISK:
+    print(f"Disk {DISK} appears to be an NVDIMM, skipping")
+    exit(status)
+
+#Check /proc/partitions, exit with fail if disk isn't found
+p = Path('/proc/partitions')
+if DISK not in p.read_text():
+    check_return_code(1, f"Disk {DISK} not found in /proc/partitions")
+
+#Next, check /proc/diskstats
+diskstats_p = Path('/proc/diskstats')
+if DISK not in diskstats_p.read_text():
+    check_return_code(1, f"Disk {DISK} not found in /proc/diskstats")
+else:
+    #Get some baseline stats for use later
+    PROC_STAT_BEGIN = [line for line in diskstats_p.read_text().splitlines() if DISK in line]
+
+#Verify the disk shows up in /sys/block/
+p = Path(f"/sys/block/*{DISK}*")
+if not p.exists():
+    check_return_code(1, f"Disk {DISK} not found in /sys/block")
+
+#Verify there are stats in /sys/block/$DISK/stat
+stat_p = Path(f"/sys/block/{DISK}/stat")
+if not stat_p.exists() or stat_p.stat().st_size == 0:
+    check_return_code(1, f"stat is either empty or nonexistant in /sys/block/{DISK}/")
+else:
+    #Get some baseline stats for use later
+    SYS_STAT_BEGIN = stat_p.read_text()
+
+#Generate some disk activity using hdparm -t
+command = ["hdparm", "-t", f"/dev/{DISK}"]
+result = subprocess.run(command)
+
+#Sleep 5 to let the stats files catch up
+time.sleep(5.0)
+
+#Make sure the stats have changed:
+PROC_STAT_END = [line for line in diskstats_p.read_text().splitlines() if DISK in line]
+SYS_STAT_END = stat_p.read_text()
+
+
