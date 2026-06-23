@@ -14,14 +14,14 @@ if args.disk:
 else:
     DISK="sda"
 
-status = 0
+STATUS = 0
 
 def check_return_code(code, msg, items=[]):
-    global status
+    global STATUS
     if code != 0:
         print(f"ERROR: retval {code} : {msg}")
-        if status == 0:
-            status = code
+        if STATUS == 0:
+            STATUS = code
 
         for item in items:
             print("output: ", item)
@@ -29,7 +29,7 @@ def check_return_code(code, msg, items=[]):
 nvdimm="pmem"
 if nvdimm in DISK:
     print(f"Disk {DISK} appears to be an NVDIMM, skipping")
-    exit(status)
+    exit(STATUS)
 
 #Check /proc/partitions, exit with fail if disk isn't found
 p = Path('/proc/partitions')
@@ -45,7 +45,7 @@ else:
     PROC_STAT_BEGIN = [line for line in diskstats_p.read_text().splitlines() if DISK in line]
 
 #Verify the disk shows up in /sys/block/
-p = Path(f"/sys/block/*{DISK}*")
+p = Path(f"/sys/block/{DISK}")
 if not p.exists():
     check_return_code(1, f"Disk {DISK} not found in /sys/block")
 
@@ -68,4 +68,13 @@ time.sleep(5.0)
 PROC_STAT_END = [line for line in diskstats_p.read_text().splitlines() if DISK in line]
 SYS_STAT_END = stat_p.read_text()
 
+if PROC_STAT_BEGIN == PROC_STAT_END:
+    check_return_code(1, "Stats in /proc/diskstats did not change", [PROC_STAT_BEGIN, PROC_STAT_END])
 
+if SYS_STAT_BEGIN == SYS_STAT_END:
+    check_return_code(1, f"Stats in /sys/block/{DISK}/stat did not change", [SYS_STAT_BEGIN, SYS_STAT_END])
+
+if STATUS == 0:
+    print(f"PASS: Finished testing stats for {DISK}")
+
+exit(STATUS)
